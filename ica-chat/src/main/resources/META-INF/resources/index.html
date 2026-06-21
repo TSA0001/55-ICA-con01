@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ICA Chat</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+      background: #f7f8fa;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      background: #1f2328;
+      color: #fff;
+      padding: 12px 20px;
+      font-size: 16px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    header select {
+      margin-left: auto;
+      background: #2d333b;
+      color: #cdd9e5;
+      border: 1px solid #444c56;
+      border-radius: 6px;
+      padding: 4px 8px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    #shutdown-btn {
+      background: transparent;
+      color: #f47067;
+      border: 1px solid #f47067;
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      margin-left: 10px;
+    }
+    #shutdown-btn:hover { background: #f47067; color: #fff; }
+    #chat-window {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .bubble {
+      max-width: 75%;
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-size: 14px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .bubble.user {
+      align-self: flex-end;
+      background: #3b82d4;
+      color: #fff;
+      border-bottom-right-radius: 4px;
+    }
+    .bubble.assistant {
+      align-self: flex-start;
+      background: #fff;
+      color: #1f2328;
+      border: 1px solid #e5e7eb;
+      border-bottom-left-radius: 4px;
+    }
+    .bubble.error {
+      align-self: flex-start;
+      background: #fff0f0;
+      color: #c0392b;
+      border: 1px solid #f5c6cb;
+    }
+    .usage {
+      font-size: 11px;
+      color: #57606a;
+      margin-top: 4px;
+      align-self: flex-start;
+      padding-left: 4px;
+    }
+    .thinking {
+      align-self: flex-start;
+      color: #57606a;
+      font-size: 13px;
+      padding: 6px 0;
+    }
+    #input-area {
+      background: #fff;
+      border-top: 1px solid #e5e7eb;
+      padding: 12px 16px;
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+    }
+    #message-input {
+      flex: 1;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 14px;
+      resize: none;
+      outline: none;
+      font-family: inherit;
+      line-height: 1.5;
+      max-height: 120px;
+    }
+    #message-input:focus { border-color: #3b82d4; }
+    #send-btn {
+      background: #3b82d4;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 20px;
+      font-size: 14px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    #send-btn:disabled { background: #aac4e8; cursor: not-allowed; }
+    #send-btn:hover:not(:disabled) { background: #2563b0; }
+    footer {
+      text-align: center;
+      font-size: 11px;
+      color: #57606a;
+      padding: 6px;
+      border-top: 1px solid #e5e7eb;
+      background: #fff;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    ICA Chat
+    <select id="model-select">
+      <option value="gpt-5.1-chat-gus">GPT-5.1 [USA]</option>
+      <option value="gpt-4o">GPT-4o [USA]</option>
+      <option value="claude-sonnet-4-5">Claude Sonnet 4.5 [USA]</option>
+      <option value="claude-sonnet-4-6">Claude Sonnet 4.6 [USA]</option>
+      <option value="claude-haiku-4-5">Claude Haiku 4.5 [USA]</option>
+      <option value="claude-opus-4-7">Claude Opus 4.7 [USA]</option>
+      <option value="meta-llama/llama-4-maverick-17b-128e-instruct-fp8">Llama4 Maverick [USA]</option>
+      <option value="ibm/granite-4-h-small">Granite 4 Small [USA]</option>
+    </select>
+    <button id="shutdown-btn">終了</button>
+  </header>
+
+  <div id="chat-window"></div>
+
+  <div id="input-area">
+    <textarea id="message-input" rows="1" placeholder="メッセージを入力... (Shift+Enter で改行、Enter で送信)"></textarea>
+    <button id="send-btn">送信</button>
+  </div>
+  <footer>Powered by IBM ICA &amp; Quarkus</footer>
+
+  <script>
+    const chatWindow = document.getElementById('chat-window');
+    const input = document.getElementById('message-input');
+    const sendBtn = document.getElementById('send-btn');
+    const modelSelect = document.getElementById('model-select');
+    const shutdownBtn = document.getElementById('shutdown-btn');
+    let sessionId = null; // サーバー発行のセッションID
+
+    // ページロード時にサーバーからセッションIDを取得
+    (async () => {
+      try {
+        const res = await fetch('/api/chat/session');
+        const data = await res.json();
+        sessionId = data.sessionId;
+      } catch (e) {
+        console.error('セッション取得失敗:', e);
+      }
+    })();
+
+    shutdownBtn.addEventListener('click', async () => {
+      if (!confirm('サーバーを終了しますか？')) return;
+      shutdownBtn.disabled = true;
+      shutdownBtn.textContent = '終了中...';
+      try {
+        await fetch('/api/chat/shutdown', { method: 'POST' });
+      } catch (_) {}
+      document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:system-ui;color:#57606a;font-size:15px;">サーバーを終了しました。このタブを閉じてください。</div>';
+    });
+
+    function addBubble(text, role) {
+      const div = document.createElement('div');
+      div.className = 'bubble ' + role;
+      div.textContent = text;
+      chatWindow.appendChild(div);
+      chatWindow.scrollTop = chatWindow.scrollHeight;
+      return div;
+    }
+
+    function addUsage(usageStr) {
+      try {
+        const u = JSON.parse(usageStr);
+        const div = document.createElement('div');
+        div.className = 'usage';
+        div.textContent = `tokens: prompt=${u.prompt_tokens} / completion=${u.completion_tokens} / total=${u.total_tokens}`;
+        chatWindow.appendChild(div);
+      } catch (_) {}
+    }
+
+    async function sendMessage() {
+      const text = input.value.trim();
+      if (!text) return;
+
+      // sessionId が未発行の場合は仮IDを生成（サーバー側でも生成するが先に確定させる）
+      if (!sessionId) sessionId = crypto.randomUUID();
+
+      addBubble(text, 'user');
+      input.value = '';
+      input.style.height = 'auto';
+      sendBtn.disabled = true;
+
+      // ストリーミング用バブルを先に作成
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble assistant';
+      chatWindow.appendChild(bubble);
+      chatWindow.scrollTop = chatWindow.scrollHeight;
+
+      try {
+        const res = await fetch('/api/chat/stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: text, sessionId: sessionId })
+        });
+
+        if (!res.ok) {
+          const data = await res.json();
+          bubble.className = 'bubble error';
+          bubble.textContent = 'エラー: ' + (data.error || res.statusText);
+          return;
+        }
+
+        // SSE ストリームを読み込み1トークンずつ表示
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          // SSE形式: "data: トークン\n\n"
+          const lines = buffer.split('\n');
+          buffer = lines.pop();
+          for (const line of lines) {
+            if (line.startsWith('data:')) {
+              const token = line.slice(5);
+              bubble.textContent += token;
+              chatWindow.scrollTop = chatWindow.scrollHeight;
+            }
+          }
+        }
+      } catch (e) {
+        bubble.className = 'bubble error';
+        bubble.textContent = '通信エラー: ' + e.message;
+      } finally {
+        sendBtn.disabled = false;
+        input.focus();
+      }
+    }
+
+    sendBtn.addEventListener('click', sendMessage);
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+    input.addEventListener('input', () => {
+      input.style.height = 'auto';
+      input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+    });
+  </script>
+</body>
+</html>

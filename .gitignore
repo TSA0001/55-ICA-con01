@@ -1,0 +1,18 @@
+# APIキーファイル（絶対にコミットしない）
+ica-api-key.txt
+ica-api-key-claude.txt
+
+# ビルド成果物
+ica-chat/target/
+
+# macOS
+.DS_Store
+
+# IDE
+.idea
+.vscode
+*.iml
+
+# Python
+__pycache__/
+*.pyc
